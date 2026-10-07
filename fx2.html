@@ -158,14 +158,14 @@ button:disabled,select:disabled{opacity:.45; cursor:not-allowed}
       <div class="pad-col">
         <div class="pad" data-r="pad" tabindex="0" role="slider">
           <canvas data-r="padCanvas"></canvas>
-          <span class="corner tl">Clean<br>squashed</span>
-          <span class="corner tr">Warm<br>squashed</span>
-          <span class="corner bl">Clean<br>open</span>
-          <span class="corner br">Warm<br>open</span>
+          <span class="corner tl">Warm<br>squashed</span>
+          <span class="corner tr">Bright<br>squashed</span>
+          <span class="corner bl">Warm<br>open</span>
+          <span class="corner br">Bright<br>open</span>
         </div>
-        <div class="axes"><span>Compression <b>↑</b></span><span>Color <b>→</b></span></div>
+        <div class="axes"><span>Compression <b>↑</b></span><span>Brightness <b>→</b></span></div>
         <div class="readout">
-          <span>Color <b data-r="rColor">0%</b></span>
+          <span>Tone <b data-r="rColor">Neutral</b></span>
           <span>Drive <b data-r="rDrive">+0 dB</b></span>
           <span>Threshold <b data-r="rThr">0 dB</b></span>
           <span>Ratio <b data-r="rRatio">1:1</b></span>
@@ -270,7 +270,7 @@ const fmtDb = v => (v > 0 ? "+" : "") + v.toFixed(1) + " dB";
 class Channel {
   constructor(i) {
     this.i = i; this.name = "Mic " + (i + 1); this.rgb = COLORS[i];
-    this.pos = { x: 0.35, y: 0.4 }; this.n = {}; this.holds = { in: 0, out: 0 };
+    this.pos = { x: 0.6, y: 0.45 }; this.n = {}; this.holds = { in: 0, out: 0 };
     this.trail = []; this.level = 0; this.bypassed = false; this.muted = false;
 
     this.root = $("chTpl").content.firstElementChild.cloneNode(true);
@@ -282,7 +282,7 @@ class Channel {
     this.q("src").setAttribute("aria-label", this.name + " source");
     this.q("inGain").setAttribute("aria-label", this.name + " input gain in dB");
     this.q("outGain").setAttribute("aria-label", this.name + " output gain in dB");
-    this.q("pad").setAttribute("aria-label", this.name + " color and compression pad. Left and right arrows change color, up and down change compression.");
+    this.q("pad").setAttribute("aria-label", this.name + " color and compression pad. Left and right arrows change brightness, up and down change compression.");
     this.pctx = this.q("padCanvas").getContext("2d");
 
     this.wire();
@@ -297,9 +297,12 @@ class Channel {
     n.preDrive = ctx.createGain();
     n.shaper = ctx.createWaveShaper(); n.shaper.oversample = "4x";
     n.postDrive = ctx.createGain();
-    n.low = ctx.createBiquadFilter(); n.low.type = "lowshelf"; n.low.frequency.value = 180;
-    n.high = ctx.createBiquadFilter(); n.high.type = "highshelf"; n.high.frequency.value = 6500;
-    n.presence = ctx.createBiquadFilter(); n.presence.type = "peaking"; n.presence.frequency.value = 2800; n.presence.Q.value = 0.8;
+    // Vocal EQ: two stacked high-passes (24 dB/oct) clear rumble, handling noise and bass bleed
+    n.hpf1 = ctx.createBiquadFilter(); n.hpf1.type = "highpass"; n.hpf1.frequency.value = 120; n.hpf1.Q.value = 0.54;
+    n.hpf2 = ctx.createBiquadFilter(); n.hpf2.type = "highpass"; n.hpf2.frequency.value = 120; n.hpf2.Q.value = 1.31;
+    n.mud = ctx.createBiquadFilter(); n.mud.type = "peaking"; n.mud.frequency.value = 320; n.mud.Q.value = 1.1;
+    n.presence = ctx.createBiquadFilter(); n.presence.type = "peaking"; n.presence.frequency.value = 3200; n.presence.Q.value = 0.9;
+    n.air = ctx.createBiquadFilter(); n.air.type = "highshelf"; n.air.frequency.value = 9000;
     n.comp = ctx.createDynamicsCompressor();
     n.comp.knee.value = 8; n.comp.attack.value = 0.006; n.comp.release.value = 0.16;
     n.makeup = ctx.createGain();
@@ -314,7 +317,7 @@ class Channel {
 
     n.input.connect(n.inAn);
     n.input.connect(n.preDrive).connect(n.shaper).connect(n.postDrive)
-      .connect(n.low).connect(n.high).connect(n.presence)
+      .connect(n.hpf1).connect(n.hpf2).connect(n.mud).connect(n.presence).connect(n.air)
       .connect(n.comp).connect(n.makeup).connect(n.fxOut).connect(n.sum);
     n.input.connect(n.dry).connect(n.sum);
 
@@ -368,22 +371,25 @@ class Channel {
 
   applyPad(instant) {
     const { x, y } = this.pos;
-    const driveDb = x * 26, thr = -y * 42, ratio = 1 + y * y * 11;
-    this.q("rColor").textContent = Math.round(x * 100) + "%";
+    const driveDb = 3 + x * 7, thr = -y * 42, ratio = 1 + y * y * 11;
+    const b = Math.round((x - 0.5) * 200);
+    this.q("rColor").textContent = Math.abs(b) < 8 ? "Neutral" : (b < 0 ? "Warm " : "Bright ") + Math.abs(b) + "%";
     this.q("rDrive").textContent = "+" + driveDb.toFixed(0) + " dB";
     this.q("rThr").textContent = thr.toFixed(0) + " dB";
     this.q("rRatio").textContent = ratio.toFixed(1) + ":1";
-    this.q("pad").setAttribute("aria-valuetext", `Color ${Math.round(x * 100)} percent, compression ${Math.round(y * 100)} percent`);
+    this.q("pad").setAttribute("aria-valuetext", `Brightness ${Math.round(x * 100)} percent, compression ${Math.round(y * 100)} percent`);
     if (!running || !this.n.comp) return;
 
     const n = this.n, t = ctx.currentTime, tc = instant ? 0.001 : 0.03;
-    const drive = 1 + x * 8;
+    // Light saturation only: keeps vocals clear rather than gritty
+    const drive = 1 + x * 2.5;
     n.preDrive.gain.setTargetAtTime(dbToGain(driveDb) / drive, t, tc);
     n.shaper.curve = makeCurve(drive);
     n.postDrive.gain.setTargetAtTime(dbToGain(-driveDb * 0.85), t, tc);
-    n.low.gain.setTargetAtTime(x * 4.5, t, tc);
-    n.high.gain.setTargetAtTime(-x * 5, t, tc);
-    n.presence.gain.setTargetAtTime(x * 1.5, t, tc);
+    // Warm (left): a little body, softer top. Bright (right): less mud, forward presence, air.
+    n.mud.gain.setTargetAtTime(1.5 - x * 5.5, t, tc);       // +1.5 dB → -4 dB at 320 Hz
+    n.presence.gain.setTargetAtTime(0.5 + x * 4.5, t, tc);  // +0.5 dB → +5 dB at 3.2 kHz
+    n.air.gain.setTargetAtTime(-3 + x * 7, t, tc);          // -3 dB → +4 dB above 9 kHz
     n.comp.threshold.setTargetAtTime(thr, t, tc);
     n.comp.ratio.setTargetAtTime(ratio, t, tc);
     n.comp.attack.setTargetAtTime(0.012 - y * 0.009, t, tc);
