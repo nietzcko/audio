@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mic FX · 2 channel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --plate:#CFCAC0; --plate-hi:#E2DED6; --ink:#23211E; --ink-soft:#5E5A53;
+  --glass:#26303A; --glass-line:#3A4652; --amber:#F2A33A;
+  --meter:#4757B8; --meter-hot:#C8402E;
+  --display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body:"Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root{ --plate:#3B3833; --plate-hi:#47433D; --ink:#EEE9E0; --ink-soft:#B3AC9F; --glass:#1A2128; --glass-line:#2E3842; }
+}
+*,*::before,*::after{box-sizing:inherit}
+html,body{margin:0}
+body{
+  background:var(--plate); color:var(--ink); font-family:var(--body); min-height:100vh;
+  background-image:repeating-linear-gradient(90deg,transparent 0 2px,rgba(255,255,255,.035) 2px 3px);
+}
+main{max-width:1440px; margin:0 auto; padding:28px 20px 40px}
+header{display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:18px}
+h1{font-family:var(--display); font-weight:700; font-size:clamp(2.2rem,6vw,3.4rem); line-height:.9; margin:0; letter-spacing:-.02em}
+h1 small{display:block; font-size:.36em; font-weight:500; letter-spacing:0; color:var(--ink-soft); margin-top:8px}
+.controls{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+button,select{
+  font:600 .95rem var(--body); color:var(--ink); background:var(--plate-hi);
+  border:1.5px solid var(--ink); border-radius:999px; padding:10px 18px; cursor:pointer;
+}
+select{padding:9px 14px; max-width:260px}
+button[aria-pressed="true"]{background:var(--ink); color:var(--plate)}
+button.primary{background:var(--amber); color:#23211E; border-color:#23211E}
+button:focus-visible,input:focus-visible,select:focus-visible,.pad:focus-visible{outline:3px solid var(--meter); outline-offset:3px}
+button:disabled,select:disabled{opacity:.45; cursor:not-allowed}
+
+.master{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:24px; font-size:.92rem}
+.master b{font:700 1.05rem var(--display)}
+.master input{width:min(260px,50vw); accent-color:var(--ink)}
+.master output{font-weight:600; font-variant-numeric:tabular-nums; min-width:4.5rem}
+.master .hbar{flex:1; min-width:140px; height:14px}
+
+#channels{display:grid; grid-template-columns:1fr; gap:26px}
+@media (min-width:1180px){ #channels{grid-template-columns:1fr 1fr} }
+
+.channel{
+  container-type:inline-size; border:1.5px solid var(--ink); border-radius:18px; padding:18px;
+  border-top:8px solid var(--ch);
+}
+.ch-head{display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px}
+.ch-head h2{font:700 1.6rem var(--display); margin:0; letter-spacing:-.01em}
+.ch-head label{font-size:.9rem; color:var(--ink-soft); display:flex; align-items:center; gap:8px}
+.ch-head button{padding:8px 16px}
+
+.rack{display:grid; grid-template-columns:auto 1fr auto; gap:18px; align-items:stretch}
+.strip{display:flex; flex-direction:column; align-items:center; gap:10px; width:76px}
+.strip h3{font:600 .9rem var(--body); margin:0}
+.strip output{font:600 .9rem var(--body); font-variant-numeric:tabular-nums}
+.fader-wrap{position:relative; height:280px; display:flex; gap:10px; justify-content:center}
+.fader-wrap input[type=range]{
+  writing-mode:vertical-lr; direction:rtl; -webkit-appearance:slider-vertical; appearance:slider-vertical;
+  width:28px; height:100%; accent-color:var(--ink); cursor:ns-resize;
+}
+.meter-box{position:relative; width:14px; height:100%; flex:none; border-radius:3px; background:var(--glass); overflow:hidden}
+.meter-box canvas,.hbar canvas{position:absolute; inset:0; width:100%; height:100%; display:block}
+.hbar{position:relative; flex:1; height:10px; border-radius:3px; background:var(--glass); overflow:hidden}
+
+.pad-col{display:flex; flex-direction:column; gap:10px; min-width:0}
+.pad{
+  position:relative; aspect-ratio:1/1; width:100%; max-height:480px; margin:0 auto;
+  background:var(--glass); border-radius:14px; touch-action:none; cursor:crosshair; overflow:hidden;
+  box-shadow:inset 0 2px 10px rgba(0,0,0,.45), 0 0 0 6px var(--plate-hi), 0 0 0 7.5px var(--ink);
+}
+.pad canvas{position:absolute; inset:0; width:100%; height:100%}
+.corner{position:absolute; font:500 .78rem var(--body); color:#9AA6B2; pointer-events:none}
+.corner.tl{top:12px; left:14px}.corner.tr{top:12px; right:14px; text-align:right}
+.corner.bl{bottom:12px; left:14px}.corner.br{bottom:12px; right:14px; text-align:right}
+.axes{display:flex; justify-content:space-between; font-size:.9rem; color:var(--ink-soft)}
+.axes b{color:var(--ink)}
+.readout{display:flex; gap:16px; flex-wrap:wrap; font-size:.88rem; color:var(--ink-soft); font-variant-numeric:tabular-nums}
+.readout b{color:var(--ink); font-weight:600}
+.gr{display:flex; align-items:center; gap:10px; font-size:.88rem; color:var(--ink-soft)}
+.gr b{min-width:4rem; text-align:right; font-variant-numeric:tabular-nums}
+
+.pan{display:grid; grid-template-columns:3rem 1fr 3.5rem; align-items:center; gap:10px; margin-top:18px; font-size:.9rem}
+.pan input{width:100%; accent-color:var(--ink)}
+.pan output{text-align:right; font-weight:600; font-variant-numeric:tabular-nums}
+
+.fx{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:18px}
+.fx fieldset{border:1.5px solid var(--ink); border-radius:14px; padding:12px 16px 16px; margin:0; background:var(--plate-hi)}
+.fx legend{font:700 1.1rem var(--display); padding:0 6px}
+.fx label{display:grid; grid-template-columns:4.8rem 1fr 4rem; align-items:center; gap:10px; font-size:.9rem; margin-top:10px}
+.fx input[type=range]{width:100%; accent-color:var(--ch)}
+.fx output{text-align:right; font-variant-numeric:tabular-nums; font-weight:600}
+
+@container (max-width:600px){
+  .fx{grid-template-columns:1fr}
+  .rack{grid-template-columns:1fr 1fr}
+  .pad-col{grid-column:1 / -1; order:-1}
+  .strip{width:100%}
+  .fader-wrap{height:190px}
+}
+
+#status{margin-top:22px; font-size:.92rem; color:var(--ink-soft); max-width:70ch}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Mic FX<small>Two mics, two pads, separate effects</small></h1>
+    <div class="controls">
+      <select id="device" aria-label="Audio interface" disabled><option>Default input</option></select>
+      <button id="start" class="primary">Turn on mics</button>
+      <button id="monitor" aria-pressed="true" disabled>Monitor</button>
+    </div>
+  </header>
+
+  <div class="master">
+    <b>Master</b>
+    <input id="masterGain" type="range" min="-24" max="12" step="0.5" value="0" aria-label="Master volume in dB">
+    <output id="masterVal">0.0 dB</output>
+    <div class="hbar"><canvas id="masterMeter"></canvas></div>
+  </div>
+
+  <div id="channels"></div>
+
+  <p id="status">Use headphones to avoid feedback. Your audio stays on this device.</p>
+</main>
+
+<template id="chTpl">
+  <section class="channel">
+    <div class="ch-head">
+      <h2 data-r="name">Mic</h2>
+      <div class="controls">
+        <label>Source <select data-r="src"><option value="0">Input 1</option><option value="1">Input 2</option></select></label>
+        <button data-r="bypass" aria-pressed="false" disabled>Bypass</button>
+        <button data-r="mute" aria-pressed="false" disabled>Mute</button>
+      </div>
+    </div>
+
+    <div class="rack">
+      <div class="strip">
+        <h3>Input</h3>
+        <div class="fader-wrap">
+          <input data-r="inGain" type="range" min="-24" max="24" step="0.5" value="0">
+          <div class="meter-box"><canvas data-r="inMeter"></canvas></div>
+        </div>
+        <output data-r="inVal">0.0 dB</output>
+      </div>
+
+      <div class="pad-col">
+        <div class="pad" data-r="pad" tabindex="0" role="slider">
+          <canvas data-r="padCanvas"></canvas>
+          <span class="corner tl">Clean<br>squashed</span>
+          <span class="corner tr">Warm<br>squashed</span>
+          <span class="corner bl">Clean<br>open</span>
+          <span class="corner br">Warm<br>open</span>
+        </div>
+        <div class="axes"><span>Compression <b>↑</b></span><span>Color <b>→</b></span></div>
+        <div class="readout">
+          <span>Color <b data-r="rColor">0%</b></span>
+          <span>Drive <b data-r="rDrive">+0 dB</b></span>
+          <span>Threshold <b data-r="rThr">0 dB</b></span>
+          <span>Ratio <b data-r="rRatio">1:1</b></span>
+        </div>
+        <div class="gr">Gain reduction <div class="hbar"><canvas data-r="grMeter"></canvas></div><b data-r="grVal">0.0 dB</b></div>
+      </div>
+
+      <div class="strip">
+        <h3>Output</h3>
+        <div class="fader-wrap">
+          <div class="meter-box"><canvas data-r="outMeter"></canvas></div>
+          <input data-r="outGain" type="range" min="-24" max="24" step="0.5" value="0">
+        </div>
+        <output data-r="outVal">0.0 dB</output>
+      </div>
+    </div>
+
+    <label class="pan">Pan <input data-r="pan" type="range" min="-100" max="100" value="0"><output data-r="panV">C</output></label>
+
+    <div class="fx">
+      <fieldset>
+        <legend>Reverb</legend>
+        <label>Mix <input data-r="revMix" type="range" min="0" max="100" value="15"><output data-r="revMixV">15%</output></label>
+        <label>Size <input data-r="revSize" type="range" min="0.3" max="6" step="0.1" value="1.8"><output data-r="revSizeV">1.8 s</output></label>
+        <label>Tone <input data-r="revTone" type="range" min="1500" max="12000" step="100" value="6000"><output data-r="revToneV">6.0 kHz</output></label>
+      </fieldset>
+      <fieldset>
+        <legend>Delay</legend>
+        <label>Mix <input data-r="dlyMix" type="range" min="0" max="100" value="0"><output data-r="dlyMixV">0%</output></label>
+        <label>Time <input data-r="dlyTime" type="range" min="40" max="1200" step="5" value="320"><output data-r="dlyTimeV">320 ms</output></label>
+        <label>Feedback <input data-r="dlyFb" type="range" min="0" max="90" value="35"><output data-r="dlyFbV">35%</output></label>
+      </fieldset>
+    </div>
+  </section>
+</template>
+
+<script>
+const $ = id => document.getElementById(id);
+const dbToGain = db => Math.pow(10, db / 20);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const COLORS = [[242,163,58], [104,196,176]];   // Mic 1 amber, Mic 2 teal
+
+let ctx = null, stream = null, src = null, splitter = null, running = false;
+const master = { holds: { m: 0 } };
+const chans = [];
+
+// ---------- Shared helpers ----------
+function makeCurve(drive) {
+  const n = 2048, curve = new Float32Array(n), norm = Math.tanh(drive);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = Math.tanh(drive * (x + 0.08 * x * x)) / norm;   // slight asymmetry for even harmonics
+  }
+  return curve;
+}
+
+const buf = new Float32Array(1024);
+function rmsPeak(an) {
+  an.getFloatTimeDomainData(buf);
+  let s = 0, p = 0;
+  for (let i = 0; i < buf.length; i++) { s += buf[i] * buf[i]; p = Math.max(p, Math.abs(buf[i])); }
+  return { rms: Math.sqrt(s / buf.length), peak: p };
+}
+const toMeter = v => clamp((20 * Math.log10(v + 1e-9) + 60) / 60, 0, 1);
+
+function fitCanvas(cv) {
+  const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1;
+  const w = Math.round(r.width * d), h = Math.round(r.height * d);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  return d;
+}
+
+// Segmented meter; draws horizontally if the canvas is wider than tall
+function drawMeter(cv, holds, key, v) {
+  const c = cv.getContext("2d"), d = fitCanvas(cv), w = cv.width, h = cv.height;
+  c.clearRect(0, 0, w, h);
+  const lvl = toMeter(v.rms * 1.4), pk = toMeter(v.peak);
+  holds[key] = Math.max(pk, holds[key] - 0.006);
+  const horiz = w > h, segs = 30, s = (horiz ? w : h) / segs;
+  for (let i = 0; i < segs; i++) {
+    const on = i / segs < lvl, hot = i >= segs - 3;
+    c.fillStyle = on ? (hot ? "#C8402E" : i >= segs - 8 ? "#F2A33A" : "#4757B8") : "rgba(255,255,255,.06)";
+    if (horiz) c.fillRect(i * s + d, d, s - 2 * d, h - 2 * d);
+    else c.fillRect(d, h - (i + 1) * s + d, w - 2 * d, s - 2 * d);
+  }
+  c.fillStyle = holds[key] > 0.95 ? "#C8402E" : "#E2DED6";
+  if (horiz) c.fillRect(holds[key] * w - 2 * d, 0, 2 * d, h);
+  else c.fillRect(0, h - holds[key] * h, w, 2 * d);
+}
+
+function drawGR(cv, label, db, rgb) {
+  const c = cv.getContext("2d"); fitCanvas(cv);
+  c.clearRect(0, 0, cv.width, cv.height);
+  const f = Math.min(1, -db / 24);
+  c.fillStyle = `rgb(${rgb})`; c.fillRect(cv.width * (1 - f), 0, cv.width * f, cv.height);
+  label.textContent = db.toFixed(1) + " dB";
+}
+
+const fmtDb = v => (v > 0 ? "+" : "") + v.toFixed(1) + " dB";
+
+// ---------- One mic channel ----------
+class Channel {
+  constructor(i) {
+    this.i = i; this.name = "Mic " + (i + 1); this.rgb = COLORS[i];
+    this.pos = { x: 0.35, y: 0.4 }; this.n = {}; this.holds = { in: 0, out: 0 };
+    this.trail = []; this.level = 0; this.bypassed = false; this.muted = false;
+
+    this.root = $("chTpl").content.firstElementChild.cloneNode(true);
+    this.root.style.setProperty("--ch", `rgb(${this.rgb})`);
+    $("channels").append(this.root);
+
+    this.q("name").textContent = this.name;
+    this.q("src").value = String(i);
+    this.q("src").setAttribute("aria-label", this.name + " source");
+    this.q("inGain").setAttribute("aria-label", this.name + " input gain in dB");
+    this.q("outGain").setAttribute("aria-label", this.name + " output gain in dB");
+    this.q("pad").setAttribute("aria-label", this.name + " color and compression pad. Left and right arrows change color, up and down change compression.");
+    this.pctx = this.q("padCanvas").getContext("2d");
+
+    this.wire();
+    this.applyGains(); this.applyPad(); this.applySpace(); this.applyPan();
+  }
+  q(r) { return this.root.querySelector(`[data-r="${r}"]`); }
+  v(r) { return +this.q(r).value; }
+
+  build() {
+    const n = this.n;
+    n.input = ctx.createGain(); n.input.channelCount = 1; n.input.channelCountMode = "explicit";
+    n.preDrive = ctx.createGain();
+    n.shaper = ctx.createWaveShaper(); n.shaper.oversample = "4x";
+    n.postDrive = ctx.createGain();
+    n.low = ctx.createBiquadFilter(); n.low.type = "lowshelf"; n.low.frequency.value = 180;
+    n.high = ctx.createBiquadFilter(); n.high.type = "highshelf"; n.high.frequency.value = 6500;
+    n.presence = ctx.createBiquadFilter(); n.presence.type = "peaking"; n.presence.frequency.value = 2800; n.presence.Q.value = 0.8;
+    n.comp = ctx.createDynamicsCompressor();
+    n.comp.knee.value = 8; n.comp.attack.value = 0.006; n.comp.release.value = 0.16;
+    n.makeup = ctx.createGain();
+    n.fxOut = ctx.createGain();
+    n.dry = ctx.createGain(); n.dry.gain.value = 0;
+    n.sum = ctx.createGain();
+    n.output = ctx.createGain();
+    n.pan = ctx.createStereoPanner();
+    n.mute = ctx.createGain();
+    n.inAn = ctx.createAnalyser(); n.inAn.fftSize = 1024;
+    n.outAn = ctx.createAnalyser(); n.outAn.fftSize = 1024;
+
+    n.input.connect(n.inAn);
+    n.input.connect(n.preDrive).connect(n.shaper).connect(n.postDrive)
+      .connect(n.low).connect(n.high).connect(n.presence)
+      .connect(n.comp).connect(n.makeup).connect(n.fxOut).connect(n.sum);
+    n.input.connect(n.dry).connect(n.sum);
+
+    // Reverb send
+    n.revSend = ctx.createGain();
+    n.conv = ctx.createConvolver();
+    n.revTone = ctx.createBiquadFilter(); n.revTone.type = "lowpass";
+    n.revReturn = ctx.createGain();
+    n.makeup.connect(n.revSend).connect(n.conv).connect(n.revTone).connect(n.revReturn).connect(n.fxOut);
+
+    // Delay send with filtered feedback
+    n.dlySend = ctx.createGain();
+    n.delay = ctx.createDelay(2);
+    n.dlyFb = ctx.createGain();
+    n.dlyFilt = ctx.createBiquadFilter(); n.dlyFilt.type = "lowpass"; n.dlyFilt.frequency.value = 4500;
+    n.dlyReturn = ctx.createGain();
+    n.makeup.connect(n.dlySend).connect(n.delay);
+    n.delay.connect(n.dlyFilt).connect(n.dlyFb).connect(n.delay);
+    n.delay.connect(n.dlyReturn).connect(n.fxOut);
+    n.dlyReturn.connect(n.revSend);   // echoes sit in the same space
+
+    // Fader -> pan -> mute -> master bus
+    n.sum.connect(n.output);
+    n.output.connect(n.outAn);
+    n.output.connect(n.pan).connect(n.mute).connect(master.bus);
+
+    this.route();
+    this.buildImpulse();
+    this.applyGains(); this.applyPad(true); this.applySpace(); this.applyPan();
+    this.q("bypass").disabled = false; this.q("mute").disabled = false;
+  }
+
+  // Connect the chosen soundcard channel into this strip
+  route() {
+    if (!splitter || !this.n.input) return;
+    try { splitter.disconnect(this.n.input); } catch (e) {}
+    splitter.connect(this.n.input, this.v("src"), 0);
+  }
+
+  buildImpulse() {
+    if (!this.n.conv) return;
+    const secs = this.v("revSize"), rate = ctx.sampleRate;
+    const len = Math.floor(rate * secs), pre = Math.floor(rate * 0.012);
+    const ir = ctx.createBuffer(2, len + pre, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < len; i++) d[i + pre] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
+    }
+    this.n.conv.buffer = ir;
+  }
+
+  applyPad(instant) {
+    const { x, y } = this.pos;
+    const driveDb = x * 26, thr = -y * 42, ratio = 1 + y * y * 11;
+    this.q("rColor").textContent = Math.round(x * 100) + "%";
+    this.q("rDrive").textContent = "+" + driveDb.toFixed(0) + " dB";
+    this.q("rThr").textContent = thr.toFixed(0) + " dB";
+    this.q("rRatio").textContent = ratio.toFixed(1) + ":1";
+    this.q("pad").setAttribute("aria-valuetext", `Color ${Math.round(x * 100)} percent, compression ${Math.round(y * 100)} percent`);
+    if (!running || !this.n.comp) return;
+
+    const n = this.n, t = ctx.currentTime, tc = instant ? 0.001 : 0.03;
+    const drive = 1 + x * 8;
+    n.preDrive.gain.setTargetAtTime(dbToGain(driveDb) / drive, t, tc);
+    n.shaper.curve = makeCurve(drive);
+    n.postDrive.gain.setTargetAtTime(dbToGain(-driveDb * 0.85), t, tc);
+    n.low.gain.setTargetAtTime(x * 4.5, t, tc);
+    n.high.gain.setTargetAtTime(-x * 5, t, tc);
+    n.presence.gain.setTargetAtTime(x * 1.5, t, tc);
+    n.comp.threshold.setTargetAtTime(thr, t, tc);
+    n.comp.ratio.setTargetAtTime(ratio, t, tc);
+    n.comp.attack.setTargetAtTime(0.012 - y * 0.009, t, tc);
+    n.makeup.gain.setTargetAtTime(dbToGain((-thr) * (1 - 1 / ratio) * 0.5), t, tc);
+  }
+
+  applySpace() {
+    const rm = this.v("revMix"), rs = this.v("revSize"), rt = this.v("revTone");
+    const dm = this.v("dlyMix"), dt = this.v("dlyTime"), df = this.v("dlyFb");
+    this.q("revMixV").textContent = rm + "%";
+    this.q("revSizeV").textContent = rs.toFixed(1) + " s";
+    this.q("revToneV").textContent = (rt / 1000).toFixed(1) + " kHz";
+    this.q("dlyMixV").textContent = dm + "%";
+    this.q("dlyTimeV").textContent = dt + " ms";
+    this.q("dlyFbV").textContent = df + "%";
+    if (!running || !this.n.conv) return;
+    const n = this.n, t = ctx.currentTime;
+    n.revSend.gain.setTargetAtTime(1, t, 0.02);
+    n.revReturn.gain.setTargetAtTime((rm / 100) * 0.9, t, 0.03);
+    n.revTone.frequency.setTargetAtTime(rt, t, 0.03);
+    n.dlySend.gain.setTargetAtTime(dm > 0 ? 1 : 0, t, 0.02);
+    n.dlyReturn.gain.setTargetAtTime(dm / 100, t, 0.03);
+    n.delay.delayTime.setTargetAtTime(dt / 1000, t, 0.06);
+    n.dlyFb.gain.setTargetAtTime(df / 100, t, 0.03);
+  }
+
+  applyGains() {
+    const i = this.v("inGain"), o = this.v("outGain");
+    this.q("inVal").textContent = fmtDb(i);
+    this.q("outVal").textContent = fmtDb(o);
+    if (!running || !this.n.input) return;
+    this.n.input.gain.setTargetAtTime(dbToGain(i), ctx.currentTime, 0.02);
+    this.n.output.gain.setTargetAtTime(dbToGain(o), ctx.currentTime, 0.02);
+  }
+
+  applyPan() {
+    const p = this.v("pan");
+    this.q("panV").textContent = p === 0 ? "C" : (p < 0 ? "L" : "R") + Math.abs(p);
+    if (!running || !this.n.pan) return;
+    this.n.pan.pan.setTargetAtTime(p / 100, ctx.currentTime, 0.02);
+  }
+
+  wire() {
+    ["revMix","revSize","revTone","dlyMix","dlyTime","dlyFb"].forEach(r =>
+      this.q(r).addEventListener("input", () => this.applySpace()));
+    this.q("revSize").addEventListener("change", () => this.buildImpulse());
+    ["inGain","outGain"].forEach(r => {
+      const el = this.q(r);
+      el.addEventListener("input", () => this.applyGains());
+      el.addEventListener("dblclick", () => { el.value = 0; this.applyGains(); });
+    });
+    const pan = this.q("pan");
+    pan.addEventListener("input", () => this.applyPan());
+    pan.addEventListener("dblclick", () => { pan.value = 0; this.applyPan(); });
+    this.q("src").addEventListener("change", () => this.route());
+
+    this.q("bypass").addEventListener("click", e => {
+      this.bypassed = !this.bypassed;
+      e.currentTarget.setAttribute("aria-pressed", this.bypassed);
+      const t = ctx.currentTime;
+      this.n.fxOut.gain.setTargetAtTime(this.bypassed ? 0 : 1, t, 0.02);
+      this.n.dry.gain.setTargetAtTime(this.bypassed ? 1 : 0, t, 0.02);
+    });
+    this.q("mute").addEventListener("click", e => {
+      this.muted = !this.muted;
+      e.currentTarget.setAttribute("aria-pressed", this.muted);
+      this.n.mute.gain.setTargetAtTime(this.muted ? 0 : 1, ctx.currentTime, 0.02);
+    });
+
+    const pad = this.q("pad");
+    const set = e => {
+      const r = pad.getBoundingClientRect();
+      this.pos.x = clamp((e.clientX - r.left) / r.width, 0, 1);
+      this.pos.y = clamp(1 - (e.clientY - r.top) / r.height, 0, 1);
+      this.applyPad();
+    };
+    pad.addEventListener("pointerdown", e => { pad.setPointerCapture(e.pointerId); set(e); });
+    pad.addEventListener("pointermove", e => { if (pad.hasPointerCapture(e.pointerId)) set(e); });
+    pad.addEventListener("keydown", e => {
+      const s = e.shiftKey ? 0.1 : 0.02;
+      const k = { ArrowLeft:[-s,0], ArrowRight:[s,0], ArrowUp:[0,s], ArrowDown:[0,-s] }[e.key];
+      if (!k) return; e.preventDefault();
+      this.pos.x = clamp(this.pos.x + k[0], 0, 1);
+      this.pos.y = clamp(this.pos.y + k[1], 0, 1);
+      this.applyPad();
+    });
+    new ResizeObserver(() => this.sizePad()).observe(pad);
+  }
+
+  sizePad() {
+    const cv = this.q("padCanvas"), d = fitCanvas(cv);
+    this.pctx.setTransform(d, 0, 0, d, 0, 0);
+  }
+
+  drawPad() {
+    const c = this.pctx, r = this.q("pad").getBoundingClientRect(), w = r.width, h = r.height;
+    const [R, G, B] = this.rgb, col = a => `rgba(${R},${G},${B},${a})`;
+    c.clearRect(0, 0, w, h);
+    c.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--glass-line");
+    c.lineWidth = 1;
+    for (let i = 1; i < 8; i++) {
+      const gx = Math.round(w * i / 8) + .5, gy = Math.round(h * i / 8) + .5;
+      c.beginPath(); c.moveTo(gx, 0); c.lineTo(gx, h); c.stroke();
+      c.beginPath(); c.moveTo(0, gy); c.lineTo(w, gy); c.stroke();
+    }
+    const px = this.pos.x * w, py = (1 - this.pos.y) * h;
+    this.trail.push([px, py]); if (this.trail.length > 24) this.trail.shift();
+    this.trail.forEach(([tx, ty], i) => {
+      c.fillStyle = col((i / this.trail.length) * 0.25);
+      c.beginPath(); c.arc(tx, ty, 4, 0, Math.PI * 2); c.fill();
+    });
+    c.strokeStyle = col(.35);
+    c.beginPath(); c.moveTo(px, 0); c.lineTo(px, h); c.moveTo(0, py); c.lineTo(w, py); c.stroke();
+    const rad = 14 + this.level * 26;
+    const g = c.createRadialGradient(px, py, 2, px, py, rad);
+    g.addColorStop(0, col(.9)); g.addColorStop(1, col(0));
+    c.fillStyle = g; c.beginPath(); c.arc(px, py, rad, 0, Math.PI * 2); c.fill();
+    c.fillStyle = col(1); c.beginPath(); c.arc(px, py, 7, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = "#23211E"; c.lineWidth = 2; c.stroke();
+  }
+
+  frame() {
+    if (running && this.n.inAn) {
+      const iv = rmsPeak(this.n.inAn), ov = rmsPeak(this.n.outAn);
+      drawMeter(this.q("inMeter"), this.holds, "in", iv);
+      drawMeter(this.q("outMeter"), this.holds, "out", ov);
+      const cr = this.n.comp.reduction, red = typeof cr === "number" ? cr : cr.value;
+      drawGR(this.q("grMeter"), this.q("grVal"), this.bypassed ? 0 : red, this.rgb);
+      this.level += (toMeter(ov.rms * 1.4) - this.level) * 0.3;
+    }
+    this.drawPad();
+  }
+}
+
+// ---------- Device / stream ----------
+const micConstraints = id => ({
+  audio: {
+    ...(id ? { deviceId: { exact: id } } : {}),
+    channelCount: { ideal: 2 },
+    echoCancellation: false, noiseSuppression: false, autoGainControl: false
+  }
+});
+
+function attach(s) {
+  if (stream && stream !== s) stream.getTracks().forEach(t => t.stop());
+  if (src) src.disconnect();
+  stream = s;
+  src = ctx.createMediaStreamSource(s);
+  src.connect(splitter);
+  const set = s.getAudioTracks()[0]?.getSettings?.() || {};
+  const n = set.channelCount;
+  $("status").textContent =
+    n === 1 ? "This input is arriving in mono, so Input 2 will be silent. Pick your 2-channel interface in the list above. If it's already selected, set it to 2 channels in your system sound settings, then reload."
+    : n >= 2 ? `Live with ${n} input channels. Use headphones to avoid feedback.`
+    : "Live. Your browser didn't report the channel count; if Mic 2 stays silent, check that your interface is set to 2 channels in system sound settings.";
+  return set.deviceId;
+}
+
+async function listDevices(currentId) {
+  const sel = $("device");
+  const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+  sel.innerHTML = "";
+  devs.forEach((d, i) => {
+    const o = document.createElement("option");
+    o.value = d.deviceId; o.textContent = d.label || "Input device " + (i + 1);
+    sel.append(o);
+  });
+  if (currentId) sel.value = currentId;
+  sel.disabled = false;
+}
+
+async function start() {
+  const s = await navigator.mediaDevices.getUserMedia(micConstraints(null));
+  ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
+  if (ctx.state === "suspended") await ctx.resume();
+  splitter = ctx.createChannelSplitter(2);
+
+  master.bus = ctx.createGain();
+  master.an = ctx.createAnalyser(); master.an.fftSize = 1024;
+  master.monitor = ctx.createGain();
+  master.bus.connect(master.an);
+  master.bus.connect(master.monitor).connect(ctx.destination);
+
+  running = true;
+  chans.forEach(c => c.build());
+  applyMaster();
+  const id = attach(s);
+  await listDevices(id);
+
+  $("start").textContent = "Mics on"; $("start").disabled = true;
+  $("monitor").disabled = false;
+}
+
+function applyMaster() {
+  const m = +$("masterGain").value;
+  $("masterVal").textContent = fmtDb(m);
+  if (running) master.bus.gain.setTargetAtTime(dbToGain(m), ctx.currentTime, 0.02);
+}
+
+// ---------- Loop ----------
+function loop() {
+  chans.forEach(c => c.frame());
+  if (running) drawMeter($("masterMeter"), master.holds, "m", rmsPeak(master.an));
+  requestAnimationFrame(loop);
+}
+
+// ---------- Wiring ----------
+for (let i = 0; i < 2; i++) chans.push(new Channel(i));
+
+$("start").addEventListener("click", async () => {
+  try { await start(); }
+  catch (err) {
+    $("status").textContent = "Microphone blocked. Allow mic access in your browser's site settings, then reload the page. (" + err.name + ")";
+  }
+});
+$("device").addEventListener("change", async e => {
+  try { attach(await navigator.mediaDevices.getUserMedia(micConstraints(e.target.value))); }
+  catch (err) { $("status").textContent = "Couldn't open that device (" + err.name + "). Check it's connected and not in use by another app."; }
+});
+$("monitor").addEventListener("click", e => {
+  const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
+  e.currentTarget.setAttribute("aria-pressed", on);
+  master.monitor.gain.setTargetAtTime(on ? 1 : 0, ctx.currentTime, 0.02);
+});
+$("masterGain").addEventListener("input", applyMaster);
+$("masterGain").addEventListener("dblclick", e => { e.target.value = 0; applyMaster(); });
+
+applyMaster();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
