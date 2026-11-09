@@ -82,6 +82,20 @@ body.dragging .drop{border-color:var(--acc);background:#13201b}
 .controls .full{grid-column:1/-1;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .controls .full h2{margin:0}
 .controls .full p{margin:0;color:var(--muted);font-size:13px;flex:1;min-width:200px}
+.tempo{gap:14px!important}
+.bpmgrp{display:flex;align-items:center;gap:8px}
+.bpm{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-weight:650}
+.bpm input{width:96px;background:#0f1114;border:1px solid var(--line);border-radius:9px;color:var(--text);font:600 18px var(--mono);padding:8px 10px;outline:none;-moz-appearance:textfield}
+.bpm input:focus{border-color:var(--acc)}
+.bpm input::-webkit-inner-spin-button,.bpm input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.btn.tap{width:72px;height:56px;align-self:flex-end;font:700 15px var(--mono);letter-spacing:.08em;color:var(--acc);border-color:#2c5a46;background:#122019;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.btn.tap.hit{background:var(--acc);color:#06281a;transition:none}
+.mini{display:flex;flex-direction:column;gap:4px;align-self:flex-end}
+.btn.sm{padding:4px 9px;font-size:12.5px;border-radius:7px;font-family:var(--mono)}
+.bigarrow{color:var(--dim);font-size:22px;align-self:flex-end;padding-bottom:12px}
+#tempoInfo{font-family:var(--mono);font-size:12.5px!important}
+#tempoInfo.bad{color:var(--hot)!important}
+#tempoInfo.on{color:var(--acc)!important}
 .row{margin-bottom:12px}
 .rl{display:flex;align-items:baseline;gap:8px}
 .rl label{font-weight:600;font-size:14px}
@@ -110,6 +124,7 @@ kbd{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line
   input[type=range]::-webkit-slider-thumb{width:22px;height:22px}
   #wave{height:130px}
   #spec{height:170px}
+  .bigarrow{display:none}
 }
 </style>
 </head>
@@ -208,6 +223,22 @@ kbd{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line
       <div id="g-loud2"></div>
       <p class="note" style="margin:0">Streaming services turn masters down to about −14 LUFS. −12 to −9 is typical for “loud”.</p>
     </div>
+    <div class="card full tempo">
+      <h2>Tempo</h2>
+      <div class="bpmgrp">
+        <label class="bpm"><span>From</span><input type="number" id="bpmFrom" inputmode="decimal" min="30" max="300" step="0.1" placeholder="BPM"></label>
+        <button class="btn tap" id="tap" title="Tap along to the beat (key: T)">TAP</button>
+        <div class="mini"><button class="btn sm" id="half" title="Halve">½×</button><button class="btn sm" id="dbl" title="Double">2×</button></div>
+      </div>
+      <span class="bigarrow">→</span>
+      <div class="bpmgrp">
+        <label class="bpm"><span>To</span><input type="number" id="bpmTo" inputmode="decimal" min="30" max="300" step="0.1" placeholder="BPM"></label>
+        <div class="mini"><button class="btn sm" id="minus" title="−1 BPM">−1</button><button class="btn sm" id="plus" title="+1 BPM">+1</button></div>
+      </div>
+      <label class="chk" title="On: time-stretch (pitch stays). Off: varispeed, like a turntable (pitch follows speed)."><input type="checkbox" id="keepPitch" checked> Keep pitch</label>
+      <p id="tempoInfo">Tap along or type the song's BPM, then set the BPM you want.</p>
+      <button class="btn sm" id="tempoReset">Reset</button>
+    </div>
   </section>
 
   <section class="card export">
@@ -218,7 +249,7 @@ kbd{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line
   </section>
 </main>
 
-<footer><kbd>Space</kbd> play/pause · <kbd>B</kbd> switch original/remaster · click the waveform to seek</footer>
+<footer><kbd>Space</kbd> play/pause · <kbd>B</kbd> switch original/remaster · <kbd>T</kbd> tap tempo · click the waveform to seek</footer>
 
 <!-- ===================== Shared DSP (also runs inside a Web Worker) ===================== -->
 <script id="dsp">
@@ -236,6 +267,8 @@ function biquadCoefs(type, f, g, Q, fs) {
     s = 2 * Math.sqrt(A) * alpha;
     b0 = A * ((A + 1) - (A - 1) * cw + s); b1 = 2 * A * ((A - 1) - (A + 1) * cw); b2 = A * ((A + 1) - (A - 1) * cw - s);
     a0 = (A + 1) + (A - 1) * cw + s; a1 = -2 * ((A - 1) + (A + 1) * cw); a2 = (A + 1) + (A - 1) * cw - s;
+  } else if (type === 'lowpass') {
+    b0 = (1 - cw) / 2; b1 = 1 - cw; b2 = (1 - cw) / 2; a0 = 1 + alpha; a1 = -2 * cw; a2 = 1 - alpha;
   } else { // highshelf
     s = 2 * Math.sqrt(A) * alpha;
     b0 = A * ((A + 1) + (A - 1) * cw + s); b1 = -2 * A * ((A - 1) + (A + 1) * cw); b2 = A * ((A + 1) + (A - 1) * cw - s);
@@ -368,21 +401,97 @@ function limiter(chs, fs, ceilDb, relMs, lookMs, nb) {
   return env;
 }
 
-var W = { orig: null, fs: 0, peak: 0, key: '', s1: null, s1L0: 0, compEnv: null };
+// Varispeed: resample (tempo AND pitch change together, like a turntable)
+function varispeed(chs, r, fs) {
+  var src = chs;
+  if (r > 1.001) { // anti-alias before speeding up
+    var lp = biquadCoefs('lowpass', 0.45 * fs / r, 0, 0.707, fs);
+    src = chs.map(function (c) { var a = c.slice(); biquadRun(a, lp); biquadRun(a, lp); return a; });
+  }
+  var n = src[0].length, m = Math.floor(n / r);
+  return src.map(function (x) {
+    var y = new Float32Array(m);
+    for (var j = 0; j < m; j++) {
+      var t = j * r, i = Math.floor(t), f = t - i;
+      var p0 = i > 0 ? x[i - 1] : x[0], p1 = x[i], p2 = i + 1 < n ? x[i + 1] : p1, p3 = i + 2 < n ? x[i + 2] : p2;
+      y[j] = p1 + 0.5 * f * (p2 - p0 + f * (2 * p0 - 5 * p1 + 4 * p2 - p3 + f * (3 * (p1 - p2) + p3 - p0)));
+    }
+    return y;
+  });
+}
+
+// WSOLA time-stretch: changes tempo, keeps pitch. r > 1 = faster.
+function wsola(chs, r, fs) {
+  var n = chs[0].length, nc = chs.length, i, k, c;
+  var N = 2 * Math.round(0.023 * fs), Hs = N / 2, Ha = Hs * r, D = 4, tolD = Math.round(0.012 * fs / D);
+  var mono = new Float32Array(n);
+  for (c = 0; c < nc; c++) { var ch = chs[c]; for (i = 0; i < n; i++) mono[i] += ch[i] / nc; }
+  var nd = Math.floor(n / D), xd = new Float32Array(nd), pre = new Float64Array(nd + 1);
+  for (k = 0; k < nd; k++) { var s = 0; for (var q = 0; q < D; q++) s += mono[k * D + q]; xd[k] = s / D; pre[k + 1] = pre[k] + xd[k] * xd[k]; }
+  var m = Math.floor(n / r), K = Math.ceil(m / Hs) + 1, Ld = Math.floor(Hs / D);
+  var win = new Float32Array(N); for (i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N);
+  var out = chs.map(function () { return new Float32Array(m + N); });
+  var prev = 0;
+  for (k = 0; k < K; k++) {
+    var pos = 0;
+    if (k > 0) {
+      var nat = prev + Hs, nom = Math.round(k * Ha), natD = Math.round(nat / D), nomD = Math.round(nom / D);
+      var best = -Infinity, bestD = nomD;
+      if (natD + Ld <= nd) {
+        for (var d = -tolD; d <= tolD; d++) {
+          var a = nomD + d; if (a < 0 || a + Ld > nd) continue;
+          var sc = 0; for (var j = 0; j < Ld; j++) sc += xd[a + j] * xd[natD + j];
+          sc /= Math.sqrt(pre[a + Ld] - pre[a] + 1e-9);
+          if (sc > best) { best = sc; bestD = a; }
+        }
+      }
+      var base = bestD * D, bestP = nom, bestS = -Infinity;
+      if (nat + Hs <= n) {
+        for (var dd = -D; dd <= D; dd++) {
+          var b = base + dd; if (b < 0 || b + Hs > n) continue;
+          var s2 = 0, e2 = 0; for (var jj = 0; jj < Hs; jj++) { var v = mono[b + jj]; s2 += v * mono[nat + jj]; e2 += v * v; }
+          s2 /= Math.sqrt(e2 + 1e-9);
+          if (s2 > bestS) { bestS = s2; bestP = b; }
+        }
+      }
+      pos = Math.max(0, bestP);
+    }
+    var o = k * Hs;
+    for (c = 0; c < nc; c++) {
+      var x = chs[c], y = out[c];
+      for (i = 0; i < N; i++) {
+        var si = pos + i; if (si >= n || o + i >= y.length) break;
+        y[o + i] += (k === 0 && i < Hs ? 1 : win[i]) * x[si];
+      }
+    }
+    prev = pos;
+  }
+  return out.map(function (y) { return y.slice(0, m); });
+}
+
+var W = { orig: null, fs: 0, peak: 0, key: '', s1: null, s1L0: 0, compEnv: null, ref: null, refPeak: 0, tempoKey: '1' };
 
 function handleMessage(msg, post) {
   if (msg.type === 'load') {
     W.orig = msg.channels; W.fs = msg.fs; W.key = ''; W.s1 = null;
     W.peak = peakOf(W.orig);
+    W.ref = W.orig; W.refPeak = W.peak; W.tempoKey = '1';
     post({ type: 'loaded', lufs: lufsOf(W.orig, W.fs), peak: W.peak });
     return;
   }
   if (msg.type !== 'process' || !W.orig) return;
-  var p = msg.params, fs = W.fs, n = W.orig[0].length, nb = Math.min(DSP_BUCKETS, n), i;
-  var key = JSON.stringify([p.eq, p.comp]);
+  var p = msg.params, fs = W.fs, i, refMsg = null;
+  var t = p.tempo || { r: 1, keep: true }, tkey = t.r === 1 ? '1' : t.r + '|' + t.keep;
+  if (tkey !== W.tempoKey) {
+    W.ref = t.r === 1 ? W.orig : (t.keep ? wsola(W.orig, t.r, fs) : varispeed(W.orig, t.r, fs));
+    W.refPeak = peakOf(W.ref); W.tempoKey = tkey; W.key = '';
+    refMsg = t.r === 1 ? 'orig' : W.ref.map(function (c) { return c.slice(); });
+  }
+  var n = W.ref[0].length, nb = Math.min(DSP_BUCKETS, n);
+  var key = JSON.stringify([tkey, p.eq, p.comp]);
   if (key !== W.key) {
-    var norm = W.peak > 1e-6 ? Math.min(1 / W.peak, 31.6) : 1; // peak-normalise so thresholds mean "dB below peak"
-    var s1 = W.orig.map(function (c) { var a = new Float32Array(c.length); for (var k = 0; k < c.length; k++) a[k] = c[k] * norm; return a; });
+    var norm = W.refPeak > 1e-6 ? Math.min(1 / W.refPeak, 31.6) : 1; // peak-normalise so thresholds mean "dB below peak"
+    var s1 = W.ref.map(function (c) { var a = new Float32Array(c.length); for (var k = 0; k < c.length; k++) a[k] = c[k] * norm; return a; });
     var eq = eqChain(p.eq, fs);
     s1.forEach(function (ch) { eq.forEach(function (cf) { biquadRun(ch, cf); }); });
     W.compEnv = p.comp.ratio > 1.001 ? compressor(s1, fs, p.comp.thr, p.comp.ratio, p.comp.atk, p.comp.rel, 6, nb) : new Float32Array(nb);
@@ -406,8 +515,9 @@ function handleMessage(msg, post) {
     if (Math.abs(nd - d) < 1e-3) break;
     d = nd;
   }
-  post({ type: 'result', id: msg.id, auto: p.auto, channels: out, compEnv: W.compEnv.slice(), limEnv: limEnv, drive: d, lufs: L, peak: peakOf(out) },
-       out.map(function (c) { return c.buffer; }));
+  var tr = out.map(function (c) { return c.buffer; });
+  if (refMsg && refMsg !== 'orig') refMsg.forEach(function (c) { tr.push(c.buffer); });
+  post({ type: 'result', id: msg.id, auto: p.auto, channels: out, ref: refMsg, compEnv: W.compEnv.slice(), limEnv: limEnv, drive: d, lufs: L, peak: peakOf(out) }, tr);
 }
 </script>
 
@@ -493,8 +603,57 @@ function params() {
     eq: { hpf: $('#hpf').checked, low: v('low'), mud: v('mud'), pres: v('pres'), air: v('air') },
     comp: { thr: v('thr'), ratio: v('ratio'), atk: 20, rel: 200 },
     drive: v('drive'), ceiling: v('ceiling'), target: v('target'), auto: $('#auto').checked, release: 80,
+    tempo: (({ r, keep }) => ({ r, keep }))(tempoParams()),
   };
 }
+
+/* ---------- tempo ---------- */
+const bpmFrom = $('#bpmFrom'), bpmTo = $('#bpmTo');
+function tempoParams() {
+  const keep = $('#keepPitch').checked, f = parseFloat(bpmFrom.value), t = parseFloat(bpmTo.value);
+  if (!(f >= 30 && f <= 300 && t >= 30 && t <= 300)) return { r: 1, keep };
+  let r = t / f;
+  if (r < 0.5 || r > 2) return { r: 1, keep, bad: true };
+  r = Math.round(r * 1e5) / 1e5;
+  if (Math.abs(r - 1) < 1e-4) r = 1;
+  return { r, keep };
+}
+function updateTempoInfo() {
+  const tp = tempoParams(), el = $('#tempoInfo');
+  bpmTo.placeholder = bpmFrom.value ? (+bpmFrom.value).toFixed(1) : 'BPM';
+  el.className = tp.bad ? 'bad' : tp.r !== 1 ? 'on' : '';
+  if (tp.bad) { el.textContent = 'Keep the change between ½× and 2× the original speed.'; return; }
+  if (tp.r === 1) { el.textContent = bpmFrom.value ? 'Now set the BPM you want.' : "Tap along or type the song's BPM, then set the BPM you want."; return; }
+  const pct = (tp.r - 1) * 100;
+  let s = `${fmt(pct, 1)}% ${pct > 0 ? 'faster' : 'slower'}`;
+  if (S.orig) s += ` · ${fmtTime(S.orig.duration)} → ${fmtTime(S.orig.duration / tp.r)}`;
+  if (!tp.keep) s += ` · pitch ${fmt(12 * Math.log2(tp.r), 1)} st`;
+  el.textContent = s;
+}
+function onTempoChange(delay) { updateTempoInfo(); schedule(delay); }
+bpmFrom.addEventListener('input', () => onTempoChange(700));
+bpmTo.addEventListener('input', () => onTempoChange(700));
+$('#keepPitch').addEventListener('change', () => onTempoChange(0));
+const nudge = (el, fn) => { const x = parseFloat(el.value) || parseFloat(bpmFrom.value); if (!(x > 0)) return; el.value = +fn(x).toFixed(1); onTempoChange(500); };
+$('#half').addEventListener('click', () => nudge(bpmFrom, x => x / 2));
+$('#dbl').addEventListener('click', () => nudge(bpmFrom, x => x * 2));
+$('#minus').addEventListener('click', () => nudge(bpmTo, x => Math.round(x) - 1));
+$('#plus').addEventListener('click', () => nudge(bpmTo, x => Math.round(x) + 1));
+$('#tempoReset').addEventListener('click', () => { bpmFrom.value = ''; bpmTo.value = ''; taps = []; onTempoChange(0); });
+let taps = [], tapFlash = 0;
+function doTap() {
+  const t = performance.now();
+  if (taps.length && t - taps[taps.length - 1] > 2000) taps = [];
+  taps.push(t); if (taps.length > 12) taps.shift();
+  const b = $('#tap'); b.classList.add('hit'); clearTimeout(tapFlash); tapFlash = setTimeout(() => b.classList.remove('hit'), 90);
+  if (taps.length >= 2) {
+    const bpm = 60000 / ((taps[taps.length - 1] - taps[0]) / (taps.length - 1));
+    bpmFrom.value = bpm.toFixed(1);
+    onTempoChange(1200);
+  } else $('#tempoInfo').textContent = 'Keep tapping…';
+}
+$('#tap').addEventListener('pointerdown', e => { e.preventDefault(); doTap(); });
+$('#tap').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doTap(); } });
 
 /* ---------- state ---------- */
 const S = { ac: null, orig: null, proc: null, name: '', origL: NaN, origPeak: NaN, procL: NaN, procPeak: NaN,
@@ -508,11 +667,21 @@ function onWorker(e) {
   if (m.type === 'loaded') { S.origL = m.lufs; S.origPeak = m.peak; updateStats(); schedule(0); return; }
   if (m.type === 'result') {
     busy = false;
-    const buf = S.ac.createBuffer(m.channels.length, m.channels[0].length, S.orig.sampleRate);
+    const sr = S.orig.sampleRate;
+    const buf = S.ac.createBuffer(m.channels.length, m.channels[0].length, sr);
     m.channels.forEach((c, i) => buf.copyToChannel(c, i));
+    let refChanged = false, wasPos = pos();
+    if (m.ref) {
+      const oldDur = S.ref.duration;
+      if (m.ref === 'orig') S.ref = S.orig;
+      else { const rb = S.ac.createBuffer(m.ref.length, m.ref[0].length, sr); m.ref.forEach((c, i) => rb.copyToChannel(c, i)); S.ref = rb; }
+      refChanged = true; wasPos = wasPos * S.ref.duration / oldDur;
+    }
     S.proc = buf; S.compEnv = m.compEnv; S.limEnv = m.limEnv; S.procL = m.lufs; S.procPeak = m.peak;
     if (m.auto) { ctl.drive.el.value = m.drive.toFixed(1); showCtl('drive'); }
-    renderWave(); renderGR(); updateStats(); applyMix(); swapProc();
+    renderWave(); renderGR(); updateStats(); applyMix();
+    if (refChanged) { if (S.playing) play(wasPos); else S.pausedAt = Math.min(wasPos, S.ref.duration); }
+    else swapProc();
     $('#dl').disabled = false;
     if (pending) { pending = false; send(); } else setStatus('ready', 'Ready');
   }
@@ -535,7 +704,9 @@ function schedule(delay) {
 function send() {
   if (!S.orig) return;
   if (busy) { pending = true; return; }
-  busy = true; setStatus('busy', 'Processing…');
+  const tp = tempoParams(), tk = tp.r + '|' + (tp.r === 1 || tp.keep);
+  busy = true; setStatus('busy', tk !== S.lastTempo ? 'Changing tempo…' : 'Processing…');
+  S.lastTempo = tk;
   worker.postMessage({ type: 'process', id: ++reqId, params: params() });
 }
 function loadIntoWorker() {
@@ -582,10 +753,10 @@ function stopSources() {
 function play(off) {
   const ac = ensureCtx(); if (ac.state !== 'running') ac.resume();
   stopSources();
-  if (off >= S.orig.duration - 0.05) off = 0;
+  if (off >= S.ref.duration - 0.05) off = 0;
   const tok = ++S.token, t = ac.currentTime + 0.04;
-  const so = ac.createBufferSource(); so.buffer = S.orig; so.connect(S.gO); so.connect(S.anaO);
-  const sp = ac.createBufferSource(); sp.buffer = S.proc || S.orig; sp.connect(S.gP); sp.connect(S.anaP);
+  const so = ac.createBufferSource(); so.buffer = S.ref; so.connect(S.gO); so.connect(S.anaO);
+  const sp = ac.createBufferSource(); sp.buffer = S.proc || S.ref; sp.connect(S.gP); sp.connect(S.anaP);
   so.start(t, off); sp.start(t, off);
   so.onended = () => { if (tok === S.token && S.playing) { S.playing = false; S.pausedAt = 0; S.srcO = S.srcP = null; updatePlayBtn(); } };
   S.srcO = so; S.srcP = sp; S.startT = t; S.startOff = off; S.playing = true; updatePlayBtn();
@@ -593,7 +764,7 @@ function play(off) {
 function pause() { S.pausedAt = pos(); stopSources(); S.playing = false; updatePlayBtn(); }
 function pos() {
   if (!S.orig) return 0;
-  if (S.playing) return Math.min(S.orig.duration, Math.max(0, S.startOff + S.ac.currentTime - S.startT));
+  if (S.playing) return Math.min(S.ref.duration, Math.max(0, S.startOff + S.ac.currentTime - S.startT));
   return S.pausedAt;
 }
 function swapProc() {
@@ -621,6 +792,7 @@ document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' && e.target.type !== 'range' && e.target.type !== 'checkbox') return;
   if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
   else if (e.key === 'b' || e.key === 'B') setMode(S.mode === 'p' ? 'o' : 'p');
+  else if ((e.key === 't' || e.key === 'T') && !e.repeat) doTap();
 });
 
 /* ---------- file loading ---------- */
@@ -644,8 +816,9 @@ async function loadFile(file) {
   try {
     const ab = await file.arrayBuffer();
     const buf = await new Promise((res, rej) => { const p = ac.decodeAudioData(ab, res, rej); if (p && p.catch) p.catch(rej); });
-    S.orig = buf; S.proc = null; S.compEnv = S.limEnv = null; S.procL = S.procPeak = NaN; S.origL = S.origPeak = NaN;
+    S.orig = buf; S.ref = buf; S.lastTempo = '1|true'; S.proc = null; S.compEnv = S.limEnv = null; S.procL = S.procPeak = NaN; S.origL = S.origPeak = NaN;
     S.pausedAt = 0; S.name = file.name.replace(/\.[^.]+$/, '');
+    bpmFrom.value = ''; bpmTo.value = ''; taps = []; updateTempoInfo();
     peakCache = new WeakMap();
     info.innerHTML = `<b>${escapeHtml(file.name)}</b>${fmtTime(buf.duration)} · ${(buf.sampleRate / 1000).toFixed(1)} kHz · ${buf.numberOfChannels === 1 ? 'mono' : buf.numberOfChannels === 2 ? 'stereo' : buf.numberOfChannels + ' ch'}`;
     $('#play').disabled = false; $('#dl').disabled = true;
@@ -725,7 +898,7 @@ function renderWave() {
     g.fillStyle = gr;
     for (let x = 0; x < Wd; x++) g.fillRect(x, mid - pk[2 * x + 1] * sc, 1, Math.max(1, (pk[2 * x + 1] - pk[2 * x]) * sc));
   }
-  const po = peaks(S.orig, Wd);
+  const po = peaks(S.ref, Wd);
   g.fillStyle = S.proc ? 'rgba(196,203,214,0.55)' : 'rgba(196,203,214,0.8)';
   for (let x = 0; x < Wd; x++) g.fillRect(x, mid - po[2 * x + 1] * sc, 1, Math.max(1, (po[2 * x + 1] - po[2 * x]) * sc));
   const cl = Math.pow(10, v('ceiling') / 20) * sc;
@@ -758,7 +931,7 @@ function drawOverlay() {
   const c2 = $('#gr'), g2 = c2.getContext('2d');
   g2.drawImage(grOff, 0, 0);
   if (!S.orig) return;
-  const p = S.scrub ? S.scrubPos : pos(), x = Math.round(p / S.orig.duration * Wd);
+  const p = S.scrub ? S.scrubPos : pos(), x = Math.round(p / S.ref.duration * Wd);
   g.fillStyle = 'rgba(12,13,16,0.38)'; g.fillRect(x, 0, Wd - x, H);
   g2.fillStyle = 'rgba(12,13,16,0.38)'; g2.fillRect(x, 0, c2.width - x, c2.height);
   g.fillStyle = '#fff'; g.fillRect(x - dpr() / 2, 0, Math.max(1, dpr()), H);
@@ -767,7 +940,7 @@ function drawOverlay() {
 // seeking
 (() => {
   const c = $('#wave');
-  const at = e => { const r = c.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * (S.orig ? S.orig.duration : 0); };
+  const at = e => { const r = c.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * (S.ref ? S.ref.duration : 0); };
   c.addEventListener('pointerdown', e => { if (!S.orig) return; S.scrub = true; S.scrubPos = at(e); c.setPointerCapture(e.pointerId); });
   c.addEventListener('pointermove', e => { if (S.scrub) S.scrubPos = at(e); });
   const end = e => { if (!S.scrub) return; S.scrub = false; const t = at(e); if (S.playing) play(t); else S.pausedAt = t; };
@@ -871,10 +1044,10 @@ function drawMeters() {
 let lastGR = '';
 function updateReadouts() {
   const p = S.scrub ? S.scrubPos : pos();
-  $('#time').textContent = `${fmtTime(p)} / ${fmtTime(S.orig ? S.orig.duration : 0)}`;
+  $('#time').textContent = `${fmtTime(p)} / ${fmtTime(S.ref ? S.ref.duration : 0)}`;
   let cg = 0, lg = 0;
   if (S.limEnv && S.orig) {
-    const b = Math.min(S.limEnv.length - 1, Math.floor(p / S.orig.duration * S.limEnv.length));
+    const b = Math.min(S.limEnv.length - 1, Math.floor(p / S.ref.duration * S.limEnv.length));
     cg = S.compEnv[b]; lg = S.limEnv[b];
   }
   const s = cg.toFixed(1) + '|' + lg.toFixed(1);
@@ -913,7 +1086,8 @@ function encodeWav(buf, bits) {
 $('#dl').addEventListener('click', () => {
   if (!S.proc) return;
   const blob = encodeWav(S.proc, S.bits), a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `${S.name || 'audio'} (remaster).wav`;
+  a.href = URL.createObjectURL(blob); const tp = tempoParams();
+  a.download = `${S.name || 'audio'} (remaster${tp.r !== 1 ? ' ' + (+bpmTo.value).toFixed(1).replace(/\.0$/, '') + ' BPM' : ''}).wav`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 30000);
 });
