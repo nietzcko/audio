@@ -148,7 +148,7 @@ const V=[
  {n:'METAL',c:'#8f1f33',p:{tune:-14,decay:1.6,tone:.8,level:.5,pan:-.35}}
 ];
 const NT=V.length, NS=16;
-const S={bpm:128,swing:0,vol:.7,playing:false,mode:'note',sel:0,pat:0,nextPat:null,
+const S={bpm:128,swing:0,vol:.75,playing:false,mode:'note',sel:0,pat:0,nextPat:null,
  density:.5,evolve:false,drive:.65,fold:.3,ring:.25,ringF:73,bits:7,down:3,glitch:.3,cutN:.6,res:7,dTime:3,dFb:.55,dMix:.2,
  stutRate:1,stutRamp:false,arpOn:true,arpHold:false,rec:false,arpMode:'up',arpRate:2,arpOct:1,arpStep:12};
 const lens=Array(NT).fill(16), mutes=Array(NT).fill(false);
@@ -157,6 +157,8 @@ const emptyPat=()=>Array.from({length:NT},()=>Array.from({length:NS},cellObj));
 const pats=[emptyPat(),emptyPat(),emptyPat(),emptyPat()];
 const rand=(a,b)=>a+Math.random()*(b-a), pick=a=>a[Math.random()*a.length|0];
 const cut=()=>40*Math.pow(2,S.cutN*8.8);
+// perceptual volume: 0 = silent, 1% = -40dB, 100% = ~-4.5dB below full scale
+const volGain=v=>v<=0?0:.6*Math.pow(10,(v-1)*40/20);
 
 function parseRow(str){return [...str].map(ch=>({on:ch!=='.'?1:0,acc:ch==='X'?1:0,rat:/[2-8]/.test(ch)?+ch:1,prob:ch==='?'?50:100}));}
 ['x..x....x.x.....','....x.......x...','............X...','x.x.x.3.x.x.x..2',
@@ -173,7 +175,7 @@ for(let n=0;n<oc.length;n++){ph+=1;if(ph>=down){ph-=down;h=bits>=16?ic[n]:st*Mat
 this.ph=ph;return true}}
 registerProcessor('crusher',Crusher);`;
 
-let ctx,noiseBuf,voiceBus,shaper,dcBlock,crusher,bitsP,downP,ringG,ringOsc,ringAmt,filt,dsend,delay,dfilt,dfb,master,comp,clip,analyser;
+let ctx,noiseBuf,voiceBus,shaper,dcBlock,crusher,bitsP,downP,ringG,ringOsc,ringAmt,filt,dsend,delay,dfilt,dfb,master,comp,clip,analyser,outVol;
 const trackOut=[],trackPan=[];
 let initP=null,lastDrive='',ohChoke=null;
 
@@ -209,7 +211,8 @@ async function initAudio(){
   analyser=ctx.createAnalyser(); analyser.fftSize=1024;
   voiceBus.connect(shaper); shaper.connect(dcBlock); dcBlock.connect(crusher); crusher.connect(ringG); ringG.connect(filt); filt.connect(master);
   filt.connect(dsend); dsend.connect(delay); delay.connect(dfilt); dfilt.connect(dfb); dfb.connect(delay); dfilt.connect(master);
-  master.connect(comp); comp.connect(clip); clip.connect(analyser); analyser.connect(ctx.destination);
+  outVol=ctx.createGain(); outVol.gain.value=0;
+  master.connect(comp); comp.connect(clip); clip.connect(analyser); analyser.connect(outVol); outVol.connect(ctx.destination);
   for(let v=0;v<NT;v++){
     const g=ctx.createGain(); let p;
     if(ctx.createStereoPanner){p=ctx.createStereoPanner(); g.connect(p); p.connect(voiceBus);} else {p=null; g.connect(voiceBus);}
@@ -241,7 +244,7 @@ function applyFx(){
   filt.frequency.setTargetAtTime(cut(),n,.02); filt.Q.setTargetAtTime(S.res,n,.02);
   delay.delayTime.setTargetAtTime(Math.min(2.9,60/S.bpm/4*S.dTime),n,.05);
   dfb.gain.setTargetAtTime(S.dFb,n,.02); dsend.gain.setTargetAtTime(S.dMix,n,.02);
-  master.gain.setTargetAtTime(S.vol,n,.02);
+  outVol.gain.setTargetAtTime(volGain(S.vol),n,.03);
 }
 
 /* ---------- voices ---------- */
@@ -447,7 +450,7 @@ function btn(parent,label,fn,id){const b=el('button','btn',label);if(id)b.id=id;
 const tp=$('#tp'),playB=$('#play');
 slider(tp,'BPM',60,200,1,()=>S.bpm,x=>{S.bpm=x;applyFx();});
 slider(tp,'SWING',0,100,1,()=>Math.round(S.swing*100),x=>S.swing=x/100,v=>v+'%');
-slider(tp,'VOL',0,1,.01,()=>S.vol,x=>{S.vol=x;applyFx();},pct);
+slider(tp,'VOL',0,1,.01,()=>S.vol,x=>{S.vol=x;applyFx();},v=>v<=0?'MUTE':Math.round(20*Math.log10(volGain(v)))+'dB');
 async function togglePlay(){
   await ensure();
   S.playing=!S.playing;
